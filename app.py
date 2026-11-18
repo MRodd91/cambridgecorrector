@@ -185,8 +185,7 @@ def parse_cambridge_pdf_key(pdf_bytes, is_model_a=True):
             if m and m.group(1) not in key:
                 key[m.group(1)] = m.group(2).strip().upper()
     return key
-
-st.title("Corrector Cambridge A2–C1 — Academia")
+    st.title("Corrector Cambridge A2–C1 — Academia")
 st.caption("Compatible con Modelo A (Tipo Test A–H), Modelo B (Escritura), fotos de móvil y Adobe Scan.")
 
 if "exams" not in st.session_state:
@@ -258,105 +257,108 @@ with tab1:
     uploaded_files = st.file_uploader(
         "Sube el PDF de Adobe Scan o selecciona las fotos de los alumnos (JPG/PNG):",
         type=("pdf", "jpg", "jpeg", "png"),
-Usa el código con precaución.
-accept_multiple_files=True
-)
-if uploaded_files:
-images_to_process = []
-for f in uploaded_files:
-if f.name.lower().endswith(".pdf"):
-doc = fitz.open(stream=f.read(), filetype="pdf")
-for i, page in enumerate(doc):
-pix = page.get_pixmap(dpi=200)
-img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR if pix.n == 4 else cv2.COLOR_RGB2BGR)
-images_to_process.append((f"{f.name} - Pág {i+1}", img))
-else:
-file_bytes = np.asarray(bytearray(f.read()), dtype=np.uint8)
-img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-images_to_process.append((f.name, img))
-if "Modelo A" in modelo_actual:
-if st.button("Corregir Lote Automáticamente", type="primary"):
-results_table = []
-for label, img_bgr in images_to_process:
-answers, visuals, error = grade_model_a(img_bgr, answer_key)
-if error:
-st.error(f"{label}: {error}")
-continue
-header_crop, annotated = visuals
-hits = sum(1 for q, corr in answer_key.items() if answers.get(q) == corr)
-total = len(answer_key)
-score_10 = round((hits / total) * 10, 2)
-wrong_qs = [f"P{q} ({answers.get(q)}≠{corr})" for q, corr in answer_key.items() if answers.get(q) != corr]
-results_table.append({
-"Alumno / Archivo": label,
-"Nivel": exam_data["nivel"],
-"Aciertos": f"{hits}/{total}",
-"Nota (0-10)": score_10,
-"Fallos": ", ".join(wrong_qs) if wrong_qs else "Ninguno"
-})
-with st.expander(f"{label} — Nota: {score_10}/10 ({hits}/{total})", expanded=True):
-c1, c2 = st.columns((1, 1.3))
-with c1:
-st.write("Cabecera del alumno:")
-st.image(cv2.cvtColor(header_crop, cv2.COLOR_BGR2RGB))
-st.write("Errores:", ", ".join(wrong_qs) if wrong_qs else "¡Todo correcto!")
-with c2:
-st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), width=350)
-if results_table:
-df = pd.DataFrame(results_table)
-st.subheader("Resultados del Grupo")
-st.dataframe(df, use_container_width=True)
-excel_buf = io.BytesIO()
-df.to_excel(excel_buf, index=False)
-st.download_button(
-"Descargar Excel con Notas (.xlsx)",
-excel_buf.getvalue(),
-file_name=f"notas_{exam_data['nivel']}.xlsx",
-mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
-else:
-st.subheader("Validación Rápida de Escritura (Modelo B)")
-max_q = max(int(k) for k in answer_key.keys())
-results_b = []
-for idx_st, (label, img_bgr) in enumerate(images_to_process):
-crops, visuals, error = crop_model_b(img_bgr, max_q)
-if error:
-st.error(f"{label}: {error}")
-continue
-header_crop, _ = visuals
-with st.expander(f"Alumno {idx_st + 1}: {label}", expanded=True):
-st.image(cv2.cvtColor(header_crop, cv2.COLOR_BGR2RGB), width=550)
-hits = 0
-for q_num in range(1, max_q + 1):
-q_str = str(q_num)
-if q_str in answer_key and q_str in crops:
-col_img, col_sol, col_chk = st.columns((2, 1.5, 1))
-with col_img:
-st.image(cv2.cvtColor(crops[q_str], cv2.COLOR_BGR2RGB))
-with col_sol:
-st.write(f"P{q_str} Solución: {answer_key[q_str]}")
-with col_chk:
-ok = st.checkbox("Correcta", key=f"chk_{idx_st}{q_str}")
-if ok:
-hits += 1
-score_10 = round((hits / len(answer_key)) * 10, 2)
-st.write(f"Nota actual: {score_10}/10 ({hits}/{len(answer_key)})")
-results_b.append({
-"Alumno / Archivo": label,
-"Nivel": exam_data["nivel"],
-"Aciertos": f"{hits}/{len(answer_key)}",
-"Nota (0-10)": score_10
-})
-if results_b:
-df_b = pd.DataFrame(results_b)
-excel_buf = io.BytesIO()
-df_b.to_excel(excel_buf, index=False)
-st.download_button(
-"Descargar Excel con Notas (.xlsx)",
-excel_buf.getvalue(),
-file_name=f"notas_escritura{exam_data['nivel']}.xlsx",
-mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+        accept_multiple_files=True
+    )
 
-<FollowUp>
+    if uploaded_files:
+        images_to_process = []
+        for f in uploaded_files:
+            if f.name.lower().endswith(".pdf"):
+                doc = fitz.open(stream=f.read(), filetype="pdf")
+                for i, page in enumerate(doc):
+                    pix = page.get_pixmap(dpi=200)
+                    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+                    img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR if pix.n == 4 else cv2.COLOR_RGB2BGR)
+                    images_to_process.append((f"{f.name} - Pág {i+1}", img))
+            else:
+                file_bytes = np.asarray(bytearray(f.read()), dtype=np.uint8)
+                img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+                images_to_process.append((f.name, img))
+
+        if "Modelo A" in modelo_actual:
+            if st.button("Corregir Lote Automáticamente", type="primary"):
+                results_table = []
+                for label, img_bgr in images_to_process:
+                    answers, visuals, error = grade_model_a(img_bgr, answer_key)
+                    if error:
+                        st.error(f"**{label}:** {error}")
+                        continue
+
+                    header_crop, annotated = visuals
+                    hits = sum(1 for q, corr in answer_key.items() if answers.get(q) == corr)
+                    total = len(answer_key)
+                    score_10 = round((hits / total) * 10, 2)
+                    wrong_qs = [f"P{q} ({answers.get(q)}≠{corr})" for q, corr in answer_key.items() if answers.get(q) != corr]
+
+                    results_table.append({
+                        "Alumno / Archivo": label,
+                        "Nivel": exam_data["nivel"],
+                        "Aciertos": f"{hits}/{total}",
+                        "Nota (0-10)": score_10,
+                        "Fallos": ", ".join(wrong_qs) if wrong_qs else "Ninguno"
+                    })
+
+                    with st.expander(f"{label} — Nota: {score_10}/10 ({hits}/{total})", expanded=True):
+                        c1, c2 = st.columns((1, 1.3))
+                        with c1:
+                            st.write("**Cabecera del alumno:**")
+                            st.image(cv2.cvtColor(header_crop, cv2.COLOR_BGR2RGB))
+                            st.write("**Errores:**", ", ".join(wrong_qs) if wrong_qs else "¡Todo correcto!")
+                        with c2:
+                            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), width=350)
+
+                if results_table:
+                    df = pd.DataFrame(results_table)
+                    st.subheader("Resultados del Grupo")
+                    st.dataframe(df, use_container_width=True)
+                    excel_buf = io.BytesIO()
+                    df.to_excel(excel_buf, index=False)
+                    st.download_button(
+                        "Descargar Excel con Notas (.xlsx)",
+                        excel_buf.getvalue(),
+                        file_name=f"notas_{exam_data['nivel']}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+        else:
+            st.subheader("Validación Rápida de Escritura (Modelo B)")
+            max_q = max(int(k) for k in answer_key.keys())
+            results_b = []
+            for idx_st, (label, img_bgr) in enumerate(images_to_process):
+                crops, visuals, error = crop_model_b(img_bgr, max_q)
+                if error:
+                    st.error(f"**{label}:** {error}")
+                    continue
+                header_crop, _ = visuals
+                with st.expander(f"Alumno {idx_st + 1}: {label}", expanded=True):
+                    st.image(cv2.cvtColor(header_crop, cv2.COLOR_BGR2RGB), width=550)
+                    hits = 0
+                    for q_num in range(1, max_q + 1):
+                        q_str = str(q_num)
+                        if q_str in answer_key and q_str in crops:
+                            col_img, col_sol, col_chk = st.columns((2, 1.5, 1))
+                            with col_img:
+                                st.image(cv2.cvtColor(crops[q_str], cv2.COLOR_BGR2RGB))
+                            with col_sol:
+                                st.write(f"**P{q_str} Solución:** `{answer_key[q_str]}`")
+                            with col_chk:
+                                ok = st.checkbox("Correcta", key=f"chk_{idx_st}_{q_str}")
+                                if ok:
+                                    hits += 1
+                    score_10 = round((hits / len(answer_key)) * 10, 2)
+                    st.write(f"**Nota actual:** {score_10}/10 ({hits}/{len(answer_key)})")
+                    results_b.append({
+                        "Alumno / Archivo": label,
+                        "Nivel": exam_data["nivel"],
+                        "Aciertos": f"{hits}/{len(answer_key)}",
+                        "Nota (0-10)": score_10
+                    })
+            if results_b:
+                df_b = pd.DataFrame(results_b)
+                excel_buf = io.BytesIO()
+                df_b.to_excel(excel_buf, index=False)
+                st.download_button(
+                    "Descargar Excel con Notas (.xlsx)",
+                    excel_buf.getvalue(),
+                    file_name=f"notas_escritura_{exam_data['nivel']}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )

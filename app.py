@@ -185,7 +185,7 @@ def parse_cambridge_pdf_key(pdf_bytes, is_model_a=True):
             if m and m.group(1) not in key:
                 key[m.group(1)] = m.group(2).strip().upper()
     return key
-    st.title("Corrector Cambridge A2–C1 — Academia")
+st.title("Corrector Cambridge A2–C1 — Academia")
 st.caption("Compatible con Modelo A (Tipo Test A–H), Modelo B (Escritura), fotos de móvil y Adobe Scan.")
 
 if "exams" not in st.session_state:

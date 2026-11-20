@@ -8,29 +8,44 @@ import os
 import re
 import io
 
-st.set_page_config(page_title="Corrector Cambridge A2–C1", layout="wide")
+st.set_page_config(page_title="Corrector Cambridge B1–C2", layout="wide")
 
-DB_FILE = "banco_examenes.json"
+DB_FILE = "banco_examenes_b1_c2.json"
 
 def load_exams():
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     return {
-        "Demo A2 Key Reading (10 preguntas - Modelo A)": {
-            "modelo": "Modelo A (Tipo Test A-H)",
-            "nivel": "A2",
-            "respuestas": {
-                "1": "B", "2": "A", "3": "C", "4": "B", "5": "A",
-                "6": "C", "7": "B", "8": "A", "9": "C", "10": "B"
-            }
-        },
-        "Demo B2 Use of English Part 2 (8 huecos - Modelo B)": {
-            "modelo": "Modelo B (Escritura 1-30)",
+        "Demo B2 Listening Oficial (Test 1)": {
+            "plantilla": "Plantilla 1: Listening Oficial (B1–C2)",
             "nivel": "B2",
             "respuestas": {
-                "1": "WHO", "2": "WHICH", "3": "DESPITE", "4": "BEEN",
-                "5": "SUCH", "6": "ALTHOUGH", "7": "MAKE", "8": "TAKEN"
+                "1": "B", "2": "A", "3": "C", "4": "B", "5": "A", "6": "C", "7": "B", "8": "A",
+                "9": "GARDENER", "10": "1985", "11": "GREENHOUSE", "12": "SOIL", "13": "TOOLS",
+                "14": "SUNLIGHT", "15": "WATERING", "16": "SEEDS", "17": "AUTUMN", "18": "MARKET",
+                "19": "E", "20": "A", "21": "H", "22": "C", "23": "F",
+                "24": "B", "25": "A", "26": "C", "27": "B", "28": "A", "29": "C", "30": "B"
+            }
+        },
+        "Demo C1 Use of English + Reading (Sample)": {
+            "plantilla": "Plantilla 2: Reading & Use of English (B1–C2)",
+            "nivel": "C1",
+            "respuestas": {
+                "1": "B", "2": "D", "3": "A", "4": "C", "5": "B", "6": "A", "7": "D", "8": "C",
+                "9": "WHO", "10": "DESPITE", "11": "BEEN", "12": "SUCH",
+                "17": "AWARENESS", "18": "SIGNIFICANTLY",
+                "31": "B", "32": "A", "33": "D", "34": "C",
+                "47": "C", "48": "A", "49": "D", "50": "B"
+            }
+        },
+        "Demo Test Generator (Units 1-4)": {
+            "plantilla": "Plantilla 3: Test Generator Doble Cara (EX 1–12)",
+            "nivel": "B2",
+            "respuestas": {
+                "EX1-1": "B", "EX1-2": "A", "EX1-3": "D", "EX1-4": "C",
+                "EX2-1": "HAVE BEEN WORKING", "EX2-2": "WOULD HAVE GONE", "EX2-3": "DESPITE",
+                "EX7-1": "C", "EX7-2": "A", "EX7-3": "B"
             }
         }
     }
@@ -62,12 +77,10 @@ def align_sheet(img_bgr):
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     h_img, w_img = gray.shape
-    min_area = (w_img * h_img) * 0.00025
-    max_area = (w_img * h_img) * 0.006
-
+    min_area = (w_img * h_img) * 0.0002
+    max_area = (w_img * h_img) * 0.0065
     fiducials = []
     for cnt in contours:
         area = cv2.contourArea(cnt)
@@ -77,116 +90,188 @@ def align_sheet(img_bgr):
             if len(approx) == 4:
                 x, y, w, h = cv2.boundingRect(approx)
                 aspect_ratio = float(w) / h
-                if 0.72 <= aspect_ratio <= 1.35:
+                if 0.70 <= aspect_ratio <= 1.40:
                     M = cv2.moments(cnt)
                     if M["m00"] != 0:
                         cx = int(M["m10"] / M["m00"])
                         cy = int(M["m01"] / M["m00"])
                         fiducials.append((cx, cy))
-
     if len(fiducials) < 4:
         return None, "No se detectaron las 4 marcas negras de las esquinas. Asegúrate de que salgan enteras en la foto."
-
     pts = np.array(fiducials, dtype="float32")
     corners = order_points(pts)
-    warped = four_point_transform(img_bgr, corners)
-    return warped, None
+    return four_point_transform(img_bgr, corners), None
 
-def grade_model_a(img_bgr, answer_key):
-    warped, error = align_sheet(img_bgr)
-    if error:
-        return None, None, error
-
-    warped_gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    warped_thresh = cv2.adaptiveThreshold(
-        warped_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 10
-    )
-
-    header_crop = warped[110:255, 30:1170]
+def read_omr_row(warped_thresh, x_start, x_step, cy, num_opts):
     letters = ("A", "B", "C", "D", "E", "F", "G", "H")
-    col_x_starts = (118, 495, 872)
-    col_x_step = 35.5
-    row_y_start = 428
-    row_y_step = 53.2
+    fill_ratios = []
+    coords = []
+    for opt_idx in range(num_opts):
+        cx = int(x_start + opt_idx * x_step)
+        x1, y1, x2, y2 = cx - 11, cy - 8, cx + 11, cy + 8
+        roi = warped_thresh[y1:y2, x1:x2]
+        ratio = cv2.countNonZero(roi) / float(roi.size) if roi.size > 0 else 0.0
+        fill_ratios.append(ratio)
+        coords.append((x1, y1, x2, y2))
+    max_fill = max(fill_ratios)
+    chosen_idx = int(np.argmax(fill_ratios))
+    chosen = letters[chosen_idx] if max_fill > 0.38 else "-"
+    return chosen, chosen_idx, coords
 
-    student_answers = {}
+def draw_box(img, box, color, thickness=3):
+    cv2.rectangle(img, (box, box), (box, box), color, thickness)
+
+def process_listening(img_bgr, answer_key):
+    warped, err = align_sheet(img_bgr)
+    if err:
+        return None, None, None, err
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 10)
+    header = warped[105:245, 30:1170]
     annotated = warped.copy()
+    omr_results = {}
+    written_crops = {}
+    letters = ("A", "B", "C", "D", "E", "F", "G", "H")
 
-    for q_num in range(1, 61):
-        col_idx = (q_num - 1) // 20
-        row_idx = (q_num - 1) % 20
-        cy = int(row_y_start + row_idx * row_y_step)
+    for idx, q in enumerate(range(1, 9)):
+        cy = int(385 + idx * 44.5)
+        chosen, c_idx, coords = read_omr_row(thresh, 145, 42.0, cy, 3)
+        omr_results[str(q)] = chosen
+        if str(q) in answer_key and answer_key[str(q)] in letters[:3]:
+            corr = answer_key[str(q)]
+            k_idx = letters.index(corr)
+            draw_box(annotated, coords[k_idx], (0, 180, 0), 3)
+            if chosen != corr and chosen != "-":
+                draw_box(annotated, coords[c_idx], (0, 0, 220), 3)
 
-        fill_ratios = []
-        boxes_coords = []
-        for opt_idx in range(8):
-            cx = int(col_x_starts[col_idx] + opt_idx * col_x_step)
-            x1, y1, x2, y2 = cx - 12, cy - 9, cx + 12, cy + 9
-            roi = warped_thresh[y1:y2, x1:x2]
-            fill_ratio = cv2.countNonZero(roi) / float(roi.size)
-            fill_ratios.append(fill_ratio)
-            boxes_coords.append((x1, y1, x2, y2))
+    for idx, q in enumerate(range(7, 19)):
+        y1 = int(380 + idx * 45.0)
+        written_crops[str(q)] = warped[y1:y1 + 38, 665:1145]
 
-        max_fill = max(fill_ratios)
-        chosen_idx = int(np.argmax(fill_ratios))
-        chosen_letter = letters[chosen_idx] if max_fill > 0.40 else "-"
-        student_answers[str(q_num)] = chosen_letter
+    for idx, q in enumerate(range(14, 24)):
+        cy = int(1020 + idx * 45.0)
+        chosen, c_idx, coords = read_omr_row(thresh, 145, 39.0, cy, 8)
+        omr_results[str(q)] = chosen
+        if str(q) in answer_key and answer_key[str(q)] in letters:
+            corr = answer_key[str(q)]
+            k_idx = letters.index(corr)
+            draw_box(annotated, coords[k_idx], (0, 180, 0), 3)
+            if chosen != corr and chosen != "-":
+                draw_box(annotated, coords[c_idx], (0, 0, 220), 3)
 
-        if str(q_num) in answer_key:
-            correct_letter = answer_key[str(q_num)].upper()
-            if correct_letter in letters:
-                correct_idx = letters.index(correct_letter)
-                cx1, cy1, cx2, cy2 = boxes_coords[correct_idx]
-                if chosen_letter == correct_letter:
-                    cv2.rectangle(annotated, (cx1, cy1), (cx2, cy2), (0, 180, 0), 3)
-                else:
-                    cv2.rectangle(annotated, (cx1, cy1), (cx2, cy2), (0, 180, 0), 2)
-                    if chosen_letter != "-":
-                        wx1, wy1, wx2, wy2 = boxes_coords[chosen_idx]
-                        cv2.rectangle(annotated, (wx1, wy1), (wx2, wy2), (0, 0, 220), 3)
+    for idx, q in enumerate(range(20, 31)):
+        cy = int(1020 + idx * 45.0)
+        chosen, c_idx, coords = read_omr_row(thresh, 710, 39.0, cy, 8)
+        omr_results[str(q)] = chosen
+        if str(q) in answer_key and answer_key[str(q)] in letters:
+            corr = answer_key[str(q)]
+            k_idx = letters.index(corr)
+            draw_box(annotated, coords[k_idx], (0, 180, 0), 3)
+            if chosen != corr and chosen != "-":
+                draw_box(annotated, coords[c_idx], (0, 0, 220), 3)
 
-    return student_answers, (header_crop, annotated), None
+    return omr_results, written_crops, (header, annotated), None
 
-def crop_model_b(img_bgr, max_q):
-    warped, error = align_sheet(img_bgr)
-    if error:
-        return None, None, error
+def process_reading_uoe(img_bgr, answer_key):
+    warped, err = align_sheet(img_bgr)
+    if err:
+        return None, None, None, err
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 10)
+    header = warped[105:245, 30:1170]
+    annotated = warped.copy()
+    omr_results = {}
+    written_crops = {}
+    letters = ("A", "B", "C", "D", "E", "F", "G", "H")
 
-    header_crop = warped[110:255, 30:1170]
-    crops = {}
-    col_x_starts = (145, 725)
-    box_w = 430
-    box_h = 62
-    row_y_start = 415
-    row_y_step = 82.5
+    for idx, q in enumerate(range(1, 9)):
+        cy = int(385 + idx * 44.0)
+        chosen, c_idx, coords = read_omr_row(thresh, 115, 38.0, cy, 4)
+        omr_results[str(q)] = chosen
+        if str(q) in answer_key and answer_key[str(q)] in letters[:4]:
+            corr = answer_key[str(q)]
+            k_idx = letters.index(corr)
+            draw_box(annotated, coords[k_idx], (0, 180, 0), 3)
+            if chosen != corr and chosen != "-":
+                draw_box(annotated, coords[c_idx], (0, 0, 220), 3)
 
-    for q_num in range(1, min(max_q, 30) + 1):
-        col_idx = (q_num - 1) // 15
-        row_idx = (q_num - 1) % 15
-        x1 = col_x_starts[col_idx]
-        y1 = int(row_y_start + row_idx * row_y_step)
-        crops[str(q_num)] = warped[y1:y1 + box_h, x1:x1 + box_w]
+    for idx, q in enumerate(range(9, 31)):
+        y1 = int(760 + idx * 41.5)
+        written_crops[str(q)] = warped[y1:y1 + 36, 110:640]
 
-    return crops, (header_crop, warped), None
+    for idx, q in enumerate(range(31, 57)):
+        cy = int(385 + idx * 48.0)
+        chosen, c_idx, coords = read_omr_row(thresh, 745, 38.0, cy, 8)
+        omr_results[str(q)] = chosen
+        if str(q) in answer_key and answer_key[str(q)] in letters:
+            corr = answer_key[str(q)]
+            k_idx = letters.index(corr)
+            draw_box(annotated, coords[k_idx], (0, 180, 0), 3)
+            if chosen != corr and chosen != "-":
+                draw_box(annotated, coords[c_idx], (0, 0, 220), 3)
 
-def parse_cambridge_pdf_key(pdf_bytes, is_model_a=True):
+    return omr_results, written_crops, (header, annotated), None
+
+def process_test_generator(img_bgr, answer_key, side=1):
+    warped, err = align_sheet(img_bgr)
+    if err:
+        return None, None, None, err
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 10)
+    header = warped[105:245, 30:1170]
+    annotated = warped.copy()
+    omr_results = {}
+    written_crops = {}
+    letters = ("A", "B", "C", "D")
+    start_ex = 1 if side == 1 else 7
+    col_x = (115, 650)
+    row_y_blocks = (355, 815, 1275)
+
+    for b_idx in range(6):
+        ex_num = start_ex + b_idx
+        c_idx = b_idx % 2
+        r_block = b_idx // 2
+        base_x = col_x[c_idx]
+        base_y = row_y_blocks[r_block]
+        for q_i in range(1, 13):
+            key_id = f"EX{ex_num}-{q_i}"
+            cy = int(base_y + (q_i - 1) * 32.5)
+            chosen, ch_idx, coords = read_omr_row(thresh, base_x, 26.0, cy, 4)
+            omr_results[key_id] = chosen
+            written_crops[key_id] = warped[cy - 13:cy + 13, base_x + 115:base_x + 445]
+            if key_id in answer_key and answer_key[key_id] in letters:
+                corr = answer_key[key_id]
+                k_idx = letters.index(corr)
+                draw_box(annotated, coords[k_idx], (0, 180, 0), 3)
+                if chosen != corr and chosen != "-":
+                    draw_box(annotated, coords[ch_idx], (0, 0, 220), 3)
+
+    return omr_results, written_crops, (header, annotated), None
+
+def parse_pdf_key(pdf_bytes, plantilla):
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    full_text = "\n".join([page.get_text() for page in doc])
+    text = "\n".join([p.get_text() for p in doc])
     key = {}
-    if is_model_a:
-        matches = re.findall(r'\b([1-5]?[0-9]|60)\s*[\.\)\:\-]?\s*([A-H])\b', full_text)
-        for num_str, letter in matches:
-            if num_str not in key:
-                key[num_str] = letter.upper()
+    if "Plantilla 3" in plantilla:
+        ex_curr = 1
+        for line in text.splitlines():
+            ex_m = re.search(r'(?:Exercise|Ex|Part)\s*(\d+)', line, re.IGNORECASE)
+            if ex_m:
+                ex_curr = int(ex_m.group(1))
+            q_m = re.match(r'^\s*(\d{1,2})\s*[\.\)\:\-]\s*(.+)$', line.strip())
+            if q_m:
+                q_n = int(q_m.group(1))
+                if 1 <= q_n <= 12 and 1 <= ex_curr <= 12:
+                    key[f"EX{ex_curr}-{q_n}"] = q_m.group(2).strip().upper()
     else:
-        lines = full_text.splitlines()
-        for line in lines:
-            m = re.match(r'^\s*([1-2]?[0-9]|30)\s*[\.\)\:\-]\s*(.+)$', line.strip())
-            if m and m.group(1) not in key:
+        for line in text.splitlines():
+            m = re.match(r'^\s*(\d{1,2})\s*[\.\)\:\-]\s*(.+)$', line.strip())
+            if m:
                 key[m.group(1)] = m.group(2).strip().upper()
     return key
-st.title("Corrector Cambridge A2–C1 — Academia")
-st.caption("Compatible con Modelo A (Tipo Test A–H), Modelo B (Escritura), fotos de móvil y Adobe Scan.")
+
+st.title("Corrector Cambridge B1–C2 — Academia")
+st.caption("Soporte completo para Listening Oficial, Reading & Use of English Oficial y Test Generator (Doble Cara).")
 
 if "exams" not in st.session_state:
     st.session_state.exams = load_exams()
@@ -194,171 +279,119 @@ if "exams" not in st.session_state:
 tab1, tab2 = st.tabs(("1. Corregir Exámenes", "2. Cargar Examen / Test Generator"))
 
 with tab2:
-    st.subheader("Configurar respuestas de un examen nuevo")
-    c_meta1, c_meta2, c_meta3 = st.columns((2, 1, 1.5))
-    with c_meta1:
-        exam_name = st.text_input("Nombre del examen (ej. B1 Preliminary Compact Test 2)")
-    with c_meta2:
-        nivel = st.selectbox("Nivel:", ("A2", "B1", "B2", "C1"))
-    with c_meta3:
-        modelo = st.selectbox("Plantilla a usar:", ("Modelo A (Tipo Test A-H)", "Modelo B (Escritura 1-30)"))
-
-    is_a = "Modelo A" in modelo
-    method = st.radio("¿Cómo cargar las soluciones?", (
-        "Subir PDF con respuestas del Cambridge Test Generator",
-        "Escribir o pegar respuestas manualmente"
+    st.subheader("Nuevo examen en el banco compartido")
+    c1, c2, c3 = st.columns((2, 1, 2))
+    with c1:
+        exam_name = st.text_input("Nombre del examen (ej. B2 First Complete Test 3)")
+    with c2:
+        nivel = st.selectbox("Nivel:", ("B1", "B2", "C1", "C2"))
+    with c3:
+        plantilla = st.selectbox("Plantilla oficial:", (
+            "Plantilla 1: Listening Oficial (B1–C2)",
+            "Plantilla 2: Reading & Use of English (B1–C2)",
+            "Plantilla 3: Test Generator Doble Cara (EX 1–12)"
+        ))
+    method = st.radio("Origen de las respuestas:", (
+        "Subir PDF con respuestas (Cambridge Test Generator / Answer Key)",
+        "Pegar respuestas manualmente"
     ))
-
-    extracted_key = {}
-    if method == "Subir PDF con respuestas del Cambridge Test Generator":
-        key_pdf = st.file_uploader("Sube el PDF del Answer Key de Cambridge", type=("pdf",))
-        if key_pdf:
-            extracted_key = parse_cambridge_pdf_key(key_pdf.read(), is_model_a=is_a)
-            if extracted_key:
-                st.success(f"Detectadas {len(extracted_key)} respuestas automáticamente.")
-            else:
-                st.warning("No se detectaron respuestas automáticamente. Puedes escribirlas abajo.")
+    extracted = {}
+    if method.startswith("Subir PDF"):
+        pdf_k = st.file_uploader("Sube el PDF de respuestas", type=("pdf",))
+        if pdf_k:
+            extracted = parse_pdf_key(pdf_k.read(), plantilla)
     else:
-        placeholder = "Ejemplo Modelo A: B, A, D, C, A... o 1:B, 2:A" if is_a else "Ejemplo Modelo B (una por línea): 1. WHO"
-        raw_text = st.text_area("Introduce las respuestas:", placeholder=placeholder)
-        if raw_text:
-            if is_a:
-                tokens = re.findall(r'[A-H]', raw_text.upper())
-                extracted_key = {str(i + 1): val for i, val in enumerate(tokens[:60])}
-            else:
-                lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
-                for i, l in enumerate(lines[:30]):
-                    clean = re.sub(r'^\d+[\.\)\:\-\s]+', '', l)
-                    extracted_key[str(i + 1)] = clean.upper()
-
-    if extracted_key:
-        st.write("**Vista previa de soluciones cargadas:**")
-        st.json(extracted_key)
-
-    if st.button("Guardar Examen en el Banco Compartido", type="primary"):
-        if exam_name and extracted_key:
-            st.session_state.exams[exam_name] = {
-                "modelo": modelo,
-                "nivel": nivel,
-                "respuestas": extracted_key
-            }
+        ph = "Formato: 1: B, 9: WHO, 31: C..." if "Plantilla 3" not in plantilla else "Formato: EX1-1: B, EX1-2: A, EX2-1: WENT..."
+        raw = st.text_area("Escribe o pega las soluciones:", placeholder=ph)
+        if raw:
+            for item in re.split(r'[\n,;]+', raw):
+                if ":" in item:
+                    k, v = item.split(":", 1)
+                    extracted[k.strip().upper()] = v.strip().upper()
+    if extracted:
+        st.json(extracted)
+    if st.button("Guardar Examen", type="primary"):
+        if exam_name and extracted:
+            st.session_state.exams[exam_name] = {"plantilla": plantilla, "nivel": nivel, "respuestas": extracted}
             save_exams(st.session_state.exams)
-            st.success(f"Examen '{exam_name}' ({nivel}) guardado correctamente.")
+            st.success(f"Examen '{exam_name}' guardado correctamente.")
         else:
-            st.error("Escribe un nombre para el examen y carga al menos una respuesta.")
+            st.error("Completa el nombre y las soluciones.")
 
 with tab1:
-    selected_exam = st.selectbox("Selecciona el examen a corregir:", list(st.session_state.exams.keys()))
-    exam_data = st.session_state.exams[selected_exam]
-    answer_key = exam_data["respuestas"]
-    modelo_actual = exam_data["modelo"]
-    st.info(f"Nivel: **{exam_data['nivel']}** | Plantilla: **{modelo_actual}** | Total preguntas: **{len(answer_key)}**")
+    sel_exam = st.selectbox("Selecciona el examen:", list(st.session_state.exams.keys()))
+    ex_data = st.session_state.exams[sel_exam]
+    a_key = ex_data["respuestas"]
+    pl_actual = ex_data["plantilla"]
+    st.info(f"Nivel: **{ex_data['nivel']}** | Plantilla: **{pl_actual}** | Ítems evaluados: **{len(a_key)}**")
 
-    uploaded_files = st.file_uploader(
-        "Sube el PDF de Adobe Scan o selecciona las fotos de los alumnos (JPG/PNG):",
-        type=("pdf", "jpg", "jpeg", "png"),
-        accept_multiple_files=True
-    )
+    side_sel = 1
+    if "Plantilla 3" in pl_actual:
+        side_sel = st.radio("¿Qué cara del Test Generator vas a subir?", (1, 2), format_func=lambda x: f"Cara {x} ({'EX 1–6' if x==1 else 'EX 7–12'})", horizontal=True)
 
-    if uploaded_files:
-        images_to_process = []
-        for f in uploaded_files:
+    files = st.file_uploader("Sube PDF de Adobe Scan o fotos de móvil (JPG/PNG):", type=("pdf", "jpg", "jpeg", "png"), accept_multiple_files=True)
+    if files:
+        imgs = []
+        for f in files:
             if f.name.lower().endswith(".pdf"):
                 doc = fitz.open(stream=f.read(), filetype="pdf")
-                for i, page in enumerate(doc):
-                    pix = page.get_pixmap(dpi=200)
-                    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-                    img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR if pix.n == 4 else cv2.COLOR_RGB2BGR)
-                    images_to_process.append((f"{f.name} - Pág {i+1}", img))
+                for i, p in enumerate(doc):
+                    pix = p.get_pixmap(dpi=200)
+                    im = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+                    imgs.append((f"{f.name} (Pág {i+1})", cv2.cvtColor(im, cv2.COLOR_RGBA2BGR if pix.n == 4 else cv2.COLOR_RGB2BGR)))
             else:
-                file_bytes = np.asarray(bytearray(f.read()), dtype=np.uint8)
-                img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-                images_to_process.append((f.name, img))
+                arr = np.asarray(bytearray(f.read()), dtype=np.uint8)
+                imgs.append((f.name, cv2.imdecode(arr, cv2.IMREAD_COLOR)))
 
-        if "Modelo A" in modelo_actual:
-            if st.button("Corregir Lote Automáticamente", type="primary"):
-                results_table = []
-                for label, img_bgr in images_to_process:
-                    answers, visuals, error = grade_model_a(img_bgr, answer_key)
-                    if error:
-                        st.error(f"**{label}:** {error}")
-                        continue
+        rows_export = []
+        for idx_s, (lbl, im_bgr) in enumerate(imgs):
+            if "Plantilla 1" in pl_actual:
+                omr, crops, vis, err = process_listening(im_bgr, a_key)
+            elif "Plantilla 2" in pl_actual:
+                omr, crops, vis, err = process_reading_uoe(im_bgr, a_key)
+            else:
+                omr, crops, vis, err = process_test_generator(im_bgr, a_key, side=side_sel)
 
-                    header_crop, annotated = visuals
-                    hits = sum(1 for q, corr in answer_key.items() if answers.get(q) == corr)
-                    total = len(answer_key)
-                    score_10 = round((hits / total) * 10, 2)
-                    wrong_qs = [f"P{q} ({answers.get(q)}≠{corr})" for q, corr in answer_key.items() if answers.get(q) != corr]
+            if err:
+                st.error(f"**{lbl}:** {err}")
+                continue
 
-                    results_table.append({
-                        "Alumno / Archivo": label,
-                        "Nivel": exam_data["nivel"],
-                        "Aciertos": f"{hits}/{total}",
-                        "Nota (0-10)": score_10,
-                        "Fallos": ", ".join(wrong_qs) if wrong_qs else "Ninguno"
-                    })
+            header_im, annot_im = vis
+            valid_letters = ("A", "B", "C", "D", "E", "F", "G", "H")
+            omr_keys = [k for k, v in a_key.items() if v in valid_letters and (not "Plantilla 3" in pl_actual or (k.startswith(tuple(f"EX{n}-" for n in (range(1,7) if side_sel==1 else range(7,13))))))]
+            write_keys = [k for k, v in a_key.items() if v not in valid_letters and k in crops]
 
-                    with st.expander(f"{label} — Nota: {score_10}/10 ({hits}/{total})", expanded=True):
-                        c1, c2 = st.columns((1, 1.3))
-                        with c1:
-                            st.write("**Cabecera del alumno:**")
-                            st.image(cv2.cvtColor(header_crop, cv2.COLOR_BGR2RGB))
-                            st.write("**Errores:**", ", ".join(wrong_qs) if wrong_qs else "¡Todo correcto!")
-                        with c2:
-                            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), width=350)
+            omr_hits = sum(1 for k in omr_keys if omr.get(k) == a_key[k])
+            write_hits = 0
 
-                if results_table:
-                    df = pd.DataFrame(results_table)
-                    st.subheader("Resultados del Grupo")
-                    st.dataframe(df, use_container_width=True)
-                    excel_buf = io.BytesIO()
-                    df.to_excel(excel_buf, index=False)
-                    st.download_button(
-                        "Descargar Excel con Notas (.xlsx)",
-                        excel_buf.getvalue(),
-                        file_name=f"notas_{exam_data['nivel']}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-        else:
-            st.subheader("Validación Rápida de Escritura (Modelo B)")
-            max_q = max(int(k) for k in answer_key.keys())
-            results_b = []
-            for idx_st, (label, img_bgr) in enumerate(images_to_process):
-                crops, visuals, error = crop_model_b(img_bgr, max_q)
-                if error:
-                    st.error(f"**{label}:** {error}")
-                    continue
-                header_crop, _ = visuals
-                with st.expander(f"Alumno {idx_st + 1}: {label}", expanded=True):
-                    st.image(cv2.cvtColor(header_crop, cv2.COLOR_BGR2RGB), width=550)
-                    hits = 0
-                    for q_num in range(1, max_q + 1):
-                        q_str = str(q_num)
-                        if q_str in answer_key and q_str in crops:
-                            col_img, col_sol, col_chk = st.columns((2, 1.5, 1))
-                            with col_img:
-                                st.image(cv2.cvtColor(crops[q_str], cv2.COLOR_BGR2RGB))
-                            with col_sol:
-                                st.write(f"**P{q_str} Solución:** `{answer_key[q_str]}`")
-                            with col_chk:
-                                ok = st.checkbox("Correcta", key=f"chk_{idx_st}_{q_str}")
-                                if ok:
-                                    hits += 1
-                    score_10 = round((hits / len(answer_key)) * 10, 2)
-                    st.write(f"**Nota actual:** {score_10}/10 ({hits}/{len(answer_key)})")
-                    results_b.append({
-                        "Alumno / Archivo": label,
-                        "Nivel": exam_data["nivel"],
-                        "Aciertos": f"{hits}/{len(answer_key)}",
-                        "Nota (0-10)": score_10
-                    })
-            if results_b:
-                df_b = pd.DataFrame(results_b)
-                excel_buf = io.BytesIO()
-                df_b.to_excel(excel_buf, index=False)
-                st.download_button(
-                    "Descargar Excel con Notas (.xlsx)",
-                    excel_buf.getvalue(),
-                    file_name=f"notas_escritura_{exam_data['nivel']}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+            with st.expander(f"Alumno {idx_s+1}: {lbl}", expanded=True):
+                c_left, c_right = st.columns((1.2, 1))
+                with c_left:
+                    st.image(cv2.cvtColor(header_im, cv2.COLOR_BGR2RGB))
+                    st.write(f"**Aciertos automáticos (Casillas):** {omr_hits} / {len(omr_keys)}")
+                    if write_keys:
+                        st.write("**Validación rápida de respuestas escritas:**")
+                        for wk in write_keys:
+                            ci, cs, cc = st.columns((2, 1.3, 1))
+                            with ci:
+                                st.image(cv2.cvtColor(crops[wk], cv2.COLOR_BGR2RGB))
+                            with cs:
+                                st.write(f"**{wk}:** `{a_key[wk]}`")
+                            with cc:
+                                if st.checkbox("OK", key=f"ok_{idx_s}_{wk}"):
+                                    write_hits += 1
+                    tot_items = len(omr_keys) + len(write_keys)
+                    tot_hits = omr_hits + write_hits
+                    nota = round((tot_hits / tot_items) * 10, 2) if tot_items > 0 else 0.0
+                    st.success(f"**Nota Total:** {nota}/10 ({tot_hits}/{tot_items} aciertos)")
+                    rows_export.append({"Alumno / Archivo": lbl, "Nivel": ex_data["nivel"], "Aciertos": f"{tot_hits}/{tot_items}", "Nota (0-10)": nota})
+                with c_right:
+                    st.image(cv2.cvtColor(annot_im, cv2.COLOR_BGR2RGB), width=350)
+
+        if rows_export:
+            df_res = pd.DataFrame(rows_export)
+            st.dataframe(df_res, use_container_width=True)
+            buf = io.BytesIO()
+            df_res.to_excel(buf, index=False)
+            st.download_button("Descargar Notas en Excel (.xlsx)", buf.getvalue(), file_name=f"notas_{ex_data['nivel']}.xlsx")
+
